@@ -333,18 +333,23 @@ enum Command {
         forget_redirects_to: Option<regex::Regex>,
     },
     Replay {
+        /// Path to the cache fetched using fetch.nix
         dir: PathBuf,
     },
 }
 
 #[derive(Parser)]
 struct Args {
+    /// Proxy listen address
     #[clap(long, short)]
     listen: Option<SocketAddr>,
+    /// Path to the ca.key file
     #[clap(long, short = 'k')]
     ca_key: Option<PathBuf>,
+    /// Path to the ca.cer file
     #[clap(long, short = 'c')]
     ca_cert: Option<PathBuf>,
+    /// Write MITM cache description to this file
     #[clap(long, short = 'o')]
     out: Option<PathBuf>,
     #[command(subcommand)]
