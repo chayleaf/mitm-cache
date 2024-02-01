@@ -8,7 +8,6 @@ edition = "2021"
 [dependencies]
 base64 = "0.21.5"
 clap = { version = "4.4.11", features = ["derive"] }
-dashmap = "5.5.3"
 hudsucker = "0.21.0"
 hyper = { version = "0.14", features = ["client"] }
 hyper-rustls = "0.24.2"
