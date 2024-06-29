@@ -12,7 +12,10 @@
 @ attrs:
 
 let
-  data' = if builtins.isPath data then builtins.fromJSON (builtins.readFile data) else data;
+  data' =
+    builtins.removeAttrs
+    (if builtins.isPath data then builtins.fromJSON (builtins.readFile data) else data)
+    [ "!version" ];
   urlToPath = url:
     if lib.hasPrefix "https://" url then (
       let
@@ -31,7 +34,7 @@ let
     name = baseNameOf path;
     source = {
       redirect = "$out/${urlToPath val}";
-      sha256 = fetchurl { inherit url; sha256 = val; };
+      hash = fetchurl { inherit url; hash = val; };
       text = writeText name val;
     }.${key} or (throw "Unknown key: ${url}");
   in ''

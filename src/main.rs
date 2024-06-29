@@ -18,7 +18,7 @@ use hyper_util::{
     rt::TokioExecutor,
 };
 use rustls_pemfile as pemfile;
-use serde::{Deserialize, Serialize};
+use serde::{ser::SerializeMap, Serialize};
 use sha2::Digest;
 use std::{
     collections::BTreeMap,
@@ -27,10 +27,7 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    sync::RwLock,
-};
+use tokio::{io::AsyncReadExt, sync::RwLock};
 
 async fn shutdown_signal() {
     tokio::signal::ctrl_c()
@@ -38,17 +35,17 @@ async fn shutdown_signal() {
         .expect("Failed to install CTRL+C signal handler");
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 enum Contents {
     #[serde(rename = "redirect")]
     Redirect(String),
-    #[serde(rename = "sha256")]
-    Sha256(String),
+    #[serde(rename = "hash")]
+    Hash(String),
     #[serde(rename = "text")]
     Text(String),
 }
 
-#[derive(Default, Deserialize, Serialize)]
+#[derive(Default, Serialize)]
 struct Page {
     #[serde(skip_serializing_if = "Option::is_none", flatten)]
     contents: Option<Contents>,
@@ -58,16 +55,19 @@ struct Page {
 }
 
 #[derive(Default)]
-struct Pages(BTreeMap<String, Page>, PathBuf);
+struct Pages(BTreeMap<String, Page>);
 
-impl Drop for Pages {
-    fn drop(&mut self) {
-        self.0
-            .serialize(&mut serde_json::Serializer::with_formatter(
-                std::fs::File::create(&self.1).unwrap(),
-                serde_json::ser::PrettyFormatter::with_indent(b" "),
-            ))
-            .unwrap();
+impl Serialize for Pages {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut ser = serializer.serialize_map(Some(self.0.len() + 1))?;
+        ser.serialize_entry("!version", &1)?;
+        for (k, v) in &self.0 {
+            ser.serialize_entry(k, v)?;
+        }
+        ser.end()
     }
 }
 
@@ -290,7 +290,7 @@ impl HttpHandler for Handler {
                                         {
                                             Contents::Text(contents.to_owned())
                                         } else {
-                                            Contents::Sha256(base64)
+                                            Contents::Hash("sha256-".to_owned() + &base64)
                                         };
                                         let mut pages = pages.write().await;
                                         for url in all_urls {
@@ -468,10 +468,7 @@ async fn main() -> Result<(), hudsucker::Error> {
         .expect("Failed to generate CA certificate");
     let ca = RcgenAuthority::new(key_pair, ca_cert, 1_000);
 
-    let pages = Arc::new(RwLock::new(Pages(
-        BTreeMap::default(),
-        args.out.unwrap_or_else(|| "out.json".into()),
-    )));
+    let pages = Arc::new(RwLock::new(Pages(BTreeMap::default())));
     let proxy = Proxy::builder()
         .with_addr(addr)
         .with_rustls_client()
@@ -502,22 +499,33 @@ async fn main() -> Result<(), hudsucker::Error> {
         .with_graceful_shutdown(shutdown_signal())
         .build();
 
+    let pages1 = pages.clone();
     tokio::spawn(async move {
         let mut ch =
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1()).unwrap();
+        let mut buf = Vec::new();
         while let Some(()) = ch.recv().await {
             let pages = pages.read().await;
-            let mut file = tokio::fs::File::create("tmp.json").await.unwrap();
-            let mut buf = Vec::new();
+            buf.clear();
             pages
-                .0
                 .serialize(&mut serde_json::Serializer::with_formatter(
                     &mut buf,
                     serde_json::ser::CompactFormatter,
                 ))
                 .unwrap();
-            file.write_all(&buf).await.unwrap();
+            tokio::fs::write("tmp.json", &buf).await.unwrap();
         }
     });
-    proxy.start().await
+    let ret = proxy.start().await;
+
+    let pages = pages1.read().await;
+    let mut buf = Vec::new();
+    pages
+        .serialize(&mut serde_json::Serializer::with_formatter(
+            &mut buf,
+            serde_json::ser::CompactFormatter,
+        ))
+        .unwrap();
+    tokio::fs::write("out.json", &buf).await.unwrap();
+    ret
 }
