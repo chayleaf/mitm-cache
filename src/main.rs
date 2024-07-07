@@ -526,6 +526,8 @@ async fn main() -> Result<(), hudsucker::Error> {
             serde_json::ser::CompactFormatter,
         ))
         .unwrap();
-    tokio::fs::write("out.json", &buf).await.unwrap();
+    tokio::fs::write(args.out.unwrap_or("out.json".into()), &buf)
+        .await
+        .unwrap();
     ret
 }
