@@ -76,6 +76,7 @@ enum Handler {
     Record {
         client: Client<HttpsConnector<HttpConnector>, Body>,
         pages: Arc<RwLock<Pages>>,
+        forget: Option<regex::Regex>,
         forget_redirects_from: Option<regex::Regex>,
         forget_redirects_to: Option<regex::Regex>,
         record_text: Option<regex::Regex>,
@@ -120,6 +121,7 @@ impl HttpHandler for Handler {
                 Self::Record {
                     client,
                     pages,
+                    forget: forget_regex,
                     forget_redirects_to,
                     forget_redirects_from,
                     record_text,
@@ -165,6 +167,9 @@ impl HttpHandler for Handler {
                                 );
                                 let store_body_info = req.method() != "HEAD";
                                 let url = process_uri(original_url);
+                                if matches!(forget_regex, Some(x) if x.is_match(&url.to_string())) {
+                                    forget = true;
+                                }
                                 if !forget {
                                     all_urls.push(url.to_string());
                                 }
@@ -400,6 +405,9 @@ enum Command {
         /// Reject requests to URLs matching this regex
         #[clap(long, short = 'x')]
         reject: Option<regex::Regex>,
+        /// Forget requests to URLs matching this regex
+        #[clap(long, short = 'F')]
+        forget: Option<regex::Regex>,
         /// Forget redirects from URLs matching this regex
         #[clap(long, short = 'f')]
         forget_redirects_from: Option<regex::Regex>,
@@ -476,6 +484,7 @@ async fn main() -> Result<(), hudsucker::Error> {
         .with_http_handler(match args.cmd {
             Command::Replay { dir } => Handler::Replay(dir),
             Command::Record {
+                forget,
                 forget_redirects_to,
                 forget_redirects_from,
                 record_text,
@@ -490,6 +499,7 @@ async fn main() -> Result<(), hudsucker::Error> {
                         .build(),
                 ),
                 pages: pages.clone(),
+                forget,
                 forget_redirects_from,
                 forget_redirects_to,
                 record_text,
